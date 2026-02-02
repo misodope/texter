@@ -3,6 +3,7 @@ import logging
 from typing import Optional
 from warp_agent_sdk import AsyncWarpAPI
 from app.config import settings
+from app.utils.errors import WarpTaskError, WarpTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -21,118 +22,119 @@ class WarpService:
     async def process_message(self, message: str, from_number: str) -> dict:
         """
         Process user message and create GitHub PR using Warp/MCP
-        
+
         Args:
             message: User's SMS message with PR instructions
             from_number: User's phone number
-            
+
         Returns:
-            dict: Result containing PR URL and status
+            dict: Result containing task_id and status
         """
         try:
             logger.info(f"Processing message from {from_number}: {message}")
-            
-            # Create a prompt for the Warp agent to create a GitHub PR
-            prompt = f"""
-            The user sent the following request via SMS:
-            {message}
-            
-            Please:
-            1. Interpret the user's request
-            2. Create a GitHub Pull Request based on their instructions
-            3. Return the PR URL in your response
-            
-            Use the GitHub MCP server to interact with GitHub.
-            """
-            
-            # Run the Warp agent with GitHub MCP server configuration
+
+            # Concise prompt optimized for SMS responses
+            prompt = f"""SMS request: {message}
+
+Execute the request and respond with ONLY:
+- On success: "PR: [full GitHub PR URL]"
+- On error: "Error: [one-line description]"
+
+No explanations. No markdown. Just the result."""
+
+            # SMS-optimized agent configuration
             response = await self.client.agent.run(
                 prompt=prompt,
                 config={
                     "environment_id": self.environment_id,
                     "model_id": self.model_id,
-                    "name": f"sms-pr-request-{from_number}",
-                    "base_prompt": "You are a helpful coding assistant that creates GitHub PRs based on user requests.",
+                    "name": f"sms-{from_number[-4:]}",
+                    "base_prompt": """You are an SMS bot. Your responses must be:
+- Under 160 characters total
+- Single line when possible
+- Start with "PR:" or "Error:"
+- Include full URLs (no markdown formatting)
+- No explanations or extra text""",
                     "mcp_servers": {
                         "github": {
-                            # Reference the GitHub MCP server configured in Warp
-                            # This assumes you have the GitHub MCP server set up
-                            "warp_id": "github"  # Use your configured GitHub MCP server ID
+                            "warp_id": "github"
                         }
                     }
                 }
             )
-            
+
             logger.info(f"Warp task created: {response.task_id}")
-            
-            # Extract PR URL from the response
-            # The actual implementation would parse the agent's output
-            # For now, we'll return the task information
-            
-            result = {
+
+            return {
                 "success": True,
                 "task_id": response.task_id,
-                "pr_url": f"https://app.warp.dev/task/{response.task_id}",  # Link to Warp task
-                "message": "PR creation task started! Check Warp for details.",
                 "error": None
             }
-            
-            return result
-            
+
         except Exception as e:
             logger.error(f"Error processing message: {str(e)}")
             return {
                 "success": False,
-                "pr_url": None,
-                "message": "Failed to create PR",
-                "error": str(e)
+                "task_id": None,
+                "error": str(e)[:100]
             }
     
-    async def get_task_result(self, task_id: str, timeout: int = 60) -> Optional[str]:
+    async def wait_for_task_completion(self, task_id: str, timeout: int = 300) -> dict:
         """
-        Poll for task completion and extract PR URL from results
-        
+        Poll Warp task until completion or timeout
+
         Args:
-            task_id: The Warp task ID
-            timeout: Maximum time to wait in seconds
-            
+            task_id: The Warp task ID to monitor
+            timeout: Maximum time to wait in seconds (default: 5 minutes)
+
         Returns:
-            Optional[str]: The GitHub PR URL if found, None otherwise
+            dict: Result with success status, PR URL or error message
         """
         import asyncio
+
+        elapsed = 0
+        poll_interval = 3
+
+        while elapsed < timeout:
+            try:
+                task = await self.client.agent.tasks.retrieve(task_id)
+
+                if task.state == "SUCCEEDED":
+                    pr_url = self._extract_pr_url(task)
+                    return {
+                        "success": True,
+                        "pr_url": pr_url,
+                        "session_link": task.session_link,
+                        "message": task.status_message.message if task.status_message else None
+                    }
+                elif task.state == "FAILED":
+                    error_msg = task.status_message.message if task.status_message else "Task failed"
+                    raise WarpTaskError(error_msg)
+                # States: QUEUED, PENDING, CLAIMED, INPROGRESS - keep polling
+
+            except Exception as e:
+                logger.error(f"Error polling task {task_id}: {str(e)}")
+
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+
+        raise WarpTimeoutError()
+
+    def _extract_pr_url(self, task) -> str:
+        """Extract GitHub PR URL from task output"""
         import re
-        
-        try:
-            # Poll for task completion
-            # Note: You may need to adjust this based on the actual Warp SDK API
-            elapsed = 0
-            poll_interval = 5
-            
-            while elapsed < timeout:
-                # Get task details (adjust based on actual SDK API)
-                # task = await self.client.tasks.get(task_id)
-                # 
-                # if task.status == "completed":
-                #     # Extract PR URL from task output
-                #     # This regex looks for GitHub PR URLs in the response
-                #     pr_url_pattern = r'https://github\.com/[\w-]+/[\w-]+/pull/\d+'
-                #     matches = re.findall(pr_url_pattern, task.output)
-                #     if matches:
-                #         return matches[0]
-                #     break
-                # elif task.status == "failed":
-                #     logger.error(f"Task {task_id} failed")
-                #     break
-                
-                await asyncio.sleep(poll_interval)
-                elapsed += poll_interval
-            
-            logger.warning(f"Timeout waiting for task {task_id} completion")
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error getting task result: {str(e)}")
-            return None
+
+        text_to_search = ""
+        if task.status_message and task.status_message.message:
+            text_to_search = task.status_message.message
+
+        pr_url_pattern = r'https://github\.com/[\w.-]+/[\w.-]+/pull/\d+'
+        matches = re.findall(pr_url_pattern, text_to_search)
+
+        if matches:
+            return matches[0]
+
+        return task.session_link if task.session_link else "PR URL not found"
     
     async def create_github_pr(
         self,

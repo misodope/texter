@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  texter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: texter-app
+    ports:
+      - "8000:8000"
+    environment:
+      # Twilio Configuration
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER:-}
+      
+      # Server Configuration
+      - HOST=0.0.0.0
+      - PORT=8000
+      
+      # Application
+      - APP_NAME=Texter
+      - DEBUG=${DEBUG:-false}
+      
+      # Warp Configuration
+      - WARP_API_KEY=${WARP_API_KEY:-}
+      - WARP_ENVIRONMENT_ID=${WARP_ENVIRONMENT_ID:-}
+      - WARP_MODEL_ID=${WARP_MODEL_ID:-claude-sonnet-4}
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    command: fastapi dev --host 0.0.0.0 --port 8000
