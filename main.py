@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from app.config import settings
 from app.routes.webhook import router as webhook_router
+from app.routes.warp import router as warp_router
 
 # Configure logging
 logging.basicConfig(
@@ -32,6 +33,7 @@ app = FastAPI(
 
 # Include routers
 app.include_router(webhook_router)
+app.include_router(warp_router)
 
 
 @app.get("/")
