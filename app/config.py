@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # Server Configuration
     host: str = "0.0.0.0"
     port: int = 8000
+    base_url: str = ""
     
     # Application
     app_name: str = "Texter"
