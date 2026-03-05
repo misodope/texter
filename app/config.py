@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     app_name: str = "Texter"
     debug: bool = False
     
+    # Personal
+    personal_phone_number: str = ""
+    
     # Warp Configuration
     warp_api_key: str = ""
     warp_environment_id: str = ""

@@ -1,7 +1,7 @@
 """Warp AI service for MCP integration"""
 import logging
 from typing import Optional
-from warp_agent_sdk import AsyncWarpAPI
+from oz_agent_sdk import AsyncOzAPI
 from app.config import settings
 from app.utils.errors import WarpTaskError, WarpTimeoutError
 
@@ -13,7 +13,7 @@ class WarpService:
     
     def __init__(self):
         """Initialize Warp SDK client"""
-        self.client = AsyncWarpAPI(
+        self.client = AsyncOzAPI(
             api_key=settings.warp_api_key
         )
         self.environment_id = settings.warp_environment_id
@@ -63,11 +63,11 @@ No explanations. No markdown. Just the result."""
                 }
             )
 
-            logger.info(f"Warp task created: {response.task_id}")
+            logger.info(f"Warp run created: {response.run_id}")
 
             return {
                 "success": True,
-                "task_id": response.task_id,
+                "run_id": response.run_id,
                 "error": None
             }
 
@@ -75,16 +75,16 @@ No explanations. No markdown. Just the result."""
             logger.error(f"Error processing message: {str(e)}")
             return {
                 "success": False,
-                "task_id": None,
+                "run_id": None,
                 "error": str(e)[:100]
             }
     
-    async def wait_for_task_completion(self, task_id: str, timeout: int = 300) -> dict:
+    async def wait_for_run_completion(self, run_id: str, timeout: int = 300) -> dict:
         """
-        Poll Warp task until completion or timeout
+        Poll Warp run until completion or timeout
 
         Args:
-            task_id: The Warp task ID to monitor
+            run_id: The Warp run ID to monitor
             timeout: Maximum time to wait in seconds (default: 5 minutes)
 
         Returns:
@@ -97,36 +97,38 @@ No explanations. No markdown. Just the result."""
 
         while elapsed < timeout:
             try:
-                task = await self.client.agent.tasks.retrieve(task_id)
+                run = await self.client.agent.runs.retrieve(run_id)
 
-                if task.state == "SUCCEEDED":
-                    pr_url = self._extract_pr_url(task)
+                if run.state == "SUCCEEDED":
+                    pr_url = self._extract_pr_url(run)
                     return {
                         "success": True,
                         "pr_url": pr_url,
-                        "session_link": task.session_link,
-                        "message": task.status_message.message if task.status_message else None
+                        "session_link": run.session_link,
+                        "message": run.status_message.message if run.status_message else None
                     }
-                elif task.state == "FAILED":
-                    error_msg = task.status_message.message if task.status_message else "Task failed"
+                elif run.state == "FAILED":
+                    error_msg = run.status_message.message if run.status_message else "Run failed"
                     raise WarpTaskError(error_msg)
                 # States: QUEUED, PENDING, CLAIMED, INPROGRESS - keep polling
 
+            except WarpTaskError:
+                raise
             except Exception as e:
-                logger.error(f"Error polling task {task_id}: {str(e)}")
+                logger.error(f"Error polling run {run_id}: {str(e)}")
 
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
 
         raise WarpTimeoutError()
 
-    def _extract_pr_url(self, task) -> str:
-        """Extract GitHub PR URL from task output"""
+    def _extract_pr_url(self, run) -> str:
+        """Extract GitHub PR URL from run output"""
         import re
 
         text_to_search = ""
-        if task.status_message and task.status_message.message:
-            text_to_search = task.status_message.message
+        if run.status_message and run.status_message.message:
+            text_to_search = run.status_message.message
 
         pr_url_pattern = r'https://github\.com/[\w.-]+/[\w.-]+/pull/\d+'
         matches = re.findall(pr_url_pattern, text_to_search)
@@ -134,7 +136,7 @@ No explanations. No markdown. Just the result."""
         if matches:
             return matches[0]
 
-        return task.session_link if task.session_link else "PR URL not found"
+        return run.session_link if run.session_link else "PR URL not found"
     
     async def create_github_pr(
         self,
@@ -184,7 +186,61 @@ No explanations. No markdown. Just the result."""
             }
         )
         
-        return f"https://app.warp.dev/task/{response.task_id}"
+        return f"https://app.warp.dev/run/{response.run_id}"
+
+
+    async def merge_pr(self, pr_url: str) -> dict:
+        """
+        Merge a GitHub PR using Warp agent with GitHub MCP
+
+        Args:
+            pr_url: Full GitHub PR URL (e.g. https://github.com/owner/repo/pull/123)
+
+        Returns:
+            dict: Result with success status
+        """
+        try:
+            logger.info(f"Merging PR: {pr_url}")
+
+            prompt = f"""Merge the following GitHub Pull Request:
+{pr_url}
+
+Use the GitHub MCP server to merge this PR. Use a merge commit.
+Respond with ONLY:
+- On success: "Merged"
+- On error: "Error: [one-line description]"
+
+No explanations. No markdown. Just the result."""
+
+            response = await self.client.agent.run(
+                prompt=prompt,
+                config={
+                    "environment_id": self.environment_id,
+                    "model_id": self.model_id,
+                    "name": "merge-pr",
+                    "mcp_servers": {
+                        "github": {
+                            "warp_id": "github"
+                        }
+                    }
+                }
+            )
+
+            logger.info(f"Merge run created: {response.run_id}")
+
+            return {
+                "success": True,
+                "run_id": response.run_id,
+                "error": None
+            }
+
+        except Exception as e:
+            logger.error(f"Error merging PR: {str(e)}")
+            return {
+                "success": False,
+                "run_id": None,
+                "error": str(e)[:100]
+            }
 
 
 warp_service = WarpService()
