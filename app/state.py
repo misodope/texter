@@ -1,4 +1,6 @@
 """In-memory state for tracking pending PRs per phone number"""
+from __future__ import annotations
+
 import re
 import logging
 
