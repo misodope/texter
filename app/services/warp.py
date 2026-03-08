@@ -18,6 +18,7 @@ class WarpService:
         )
         self.environment_id = settings.warp_environment_id
         self.model_id = settings.warp_model_id
+        self.github_mcp_id = settings.warp_github_mcp_id
     
     async def process_message(self, message: str, from_number: str) -> dict:
         """
@@ -180,67 +181,13 @@ No explanations. No markdown. Just the result."""
                 "name": f"create-pr-{repo}",
                 "mcp_servers": {
                     "github": {
-                        "warp_id": "github"
+                        "warp_id": self.github_mcp_id
                     }
                 }
             }
         )
         
         return f"https://app.warp.dev/run/{response.run_id}"
-
-
-    async def merge_pr(self, pr_url: str) -> dict:
-        """
-        Merge a GitHub PR using Warp agent with GitHub MCP
-
-        Args:
-            pr_url: Full GitHub PR URL (e.g. https://github.com/owner/repo/pull/123)
-
-        Returns:
-            dict: Result with success status
-        """
-        try:
-            logger.info(f"Merging PR: {pr_url}")
-
-            prompt = f"""Merge the following GitHub Pull Request:
-{pr_url}
-
-Use the GitHub MCP server to merge this PR. Use a merge commit.
-Respond with ONLY:
-- On success: "Merged"
-- On error: "Error: [one-line description]"
-
-No explanations. No markdown. Just the result."""
-
-            response = await self.client.agent.run(
-                prompt=prompt,
-                config={
-                    "environment_id": self.environment_id,
-                    "model_id": self.model_id,
-                    "name": "merge-pr",
-                    "mcp_servers": {
-                        "github": {
-                            "warp_id": "github"
-                        }
-                    }
-                }
-            )
-
-            logger.info(f"Merge run created: {response.run_id}")
-
-            return {
-                "success": True,
-                "run_id": response.run_id,
-                "error": None
-            }
-
-        except Exception as e:
-            logger.error(f"Error merging PR: {str(e)}")
-            return {
-                "success": False,
-                "run_id": None,
-                "error": str(e)[:100]
-            }
 
 
 warp_service = WarpService()
