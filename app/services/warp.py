@@ -8,11 +8,20 @@ from app.utils.errors import WarpTaskError, WarpTimeoutError
 logger = logging.getLogger(__name__)
 
 
+# Terminal run states that indicate the agent is done
+_TERMINAL_STATES = {"SUCCEEDED", "FAILED", "ERROR", "CANCELLED"}
+
+
 class WarpService:
     """Handles Warp AI and MCP interactions for GitHub operations"""
     
     def __init__(self):
         """Initialize Warp SDK client"""
+        if not settings.warp_api_key:
+            raise ValueError("WARP_API_KEY is required")
+        if not settings.github_pat:
+            raise ValueError("GITHUB_PAT is required — MCP server will crash without it")
+
         self.client = AsyncOzAPI(
             api_key=settings.warp_api_key
         )
@@ -99,10 +108,21 @@ No explanations. No markdown. Just the result."""
 
         elapsed = 0
         poll_interval = 3
+        last_state = None
+
+        logger.info(f"Polling run {run_id} (timeout={timeout}s)")
 
         while elapsed < timeout:
             try:
                 run = await self.client.agent.runs.retrieve(run_id)
+                status_msg = run.status_message.message if run.status_message else None
+
+                # Log state transitions
+                if run.state != last_state:
+                    logger.info(f"Run {run_id[:8]} state: {last_state} -> {run.state}")
+                    if status_msg:
+                        logger.info(f"Run {run_id[:8]} status: {status_msg[:200]}")
+                    last_state = run.state
 
                 if run.state == "SUCCEEDED":
                     pr_url = self._extract_pr_url(run)
@@ -110,21 +130,27 @@ No explanations. No markdown. Just the result."""
                         "success": True,
                         "pr_url": pr_url,
                         "session_link": run.session_link,
-                        "message": run.status_message.message if run.status_message else None
+                        "message": status_msg
                     }
-                elif run.state == "FAILED":
-                    error_msg = run.status_message.message if run.status_message else "Run failed"
+                elif run.state in _TERMINAL_STATES:
+                    error_msg = status_msg or f"Run ended with state: {run.state}"
+                    logger.error(f"Run {run_id[:8]} terminal failure [{run.state}]: {error_msg[:300]}")
                     raise WarpTaskError(error_msg)
-                # States: QUEUED, PENDING, CLAIMED, INPROGRESS - keep polling
+
+                # Still in progress — back off gradually
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+                if poll_interval < 10:
+                    poll_interval = min(poll_interval + 1, 10)
 
             except WarpTaskError:
                 raise
             except Exception as e:
-                logger.error(f"Error polling run {run_id}: {str(e)}")
+                logger.error(f"Error polling run {run_id[:8]}: {str(e)}")
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
 
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
-
+        logger.error(f"Run {run_id[:8]} timed out after {timeout}s (last state: {last_state})")
         raise WarpTimeoutError()
 
     def _extract_pr_url(self, run) -> str:
