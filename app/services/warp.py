@@ -19,9 +19,10 @@ class WarpService:
         self.environment_id = settings.warp_environment_id
         self.model_id = settings.warp_model_id
         self.github_mcp_config = {
-            "url": "https://api.githubcopilot.com/mcp/",
-            "headers": {
-                "Authorization": f"Bearer {settings.github_pat}"
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-github"],
+            "env": {
+                "GITHUB_PERSONAL_ACCESS_TOKEN": settings.github_pat
             }
         }
     
