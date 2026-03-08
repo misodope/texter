@@ -58,7 +58,7 @@ No explanations. No markdown. Just the result."""
 - No explanations or extra text""",
                     "mcp_servers": {
                         "github": {
-                            "warp_id": "github"
+                            "warp_id": self.github_mcp_id
                         }
                     }
                 }
@@ -181,7 +181,7 @@ No explanations. No markdown. Just the result."""
                 "name": f"create-pr-{repo}",
                 "mcp_servers": {
                     "github": {
-                        "warp_id": self.github_mcp_id
+                        "warp_id": self.github_mcp_id,
                     }
                 }
             }
