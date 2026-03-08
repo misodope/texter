@@ -18,7 +18,12 @@ class WarpService:
         )
         self.environment_id = settings.warp_environment_id
         self.model_id = settings.warp_model_id
-        self.github_mcp_id = settings.warp_github_mcp_id
+        self.github_mcp_config = {
+            "url": "https://api.githubcopilot.com/mcp/",
+            "headers": {
+                "Authorization": f"Bearer {settings.github_pat}"
+            }
+        }
     
     async def process_message(self, message: str, from_number: str) -> dict:
         """
@@ -57,9 +62,7 @@ No explanations. No markdown. Just the result."""
 - Include full URLs (no markdown formatting)
 - No explanations or extra text""",
                     "mcp_servers": {
-                        "github": {
-                            "warp_id": self.github_mcp_id
-                        }
+                        "github": self.github_mcp_config
                     }
                 }
             )
@@ -180,9 +183,7 @@ No explanations. No markdown. Just the result."""
                 "model_id": self.model_id,
                 "name": f"create-pr-{repo}",
                 "mcp_servers": {
-                    "github": {
-                        "warp_id": self.github_mcp_id,
-                    }
+                    "github": self.github_mcp_config
                 }
             }
         )

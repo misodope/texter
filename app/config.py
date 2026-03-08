@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     warp_api_key: str = ""
     warp_environment_id: str = ""
     warp_model_id: str = "claude-sonnet-4"
-    warp_github_mcp_id: str = ""
+    github_pat: str = ""
     
     model_config = SettingsConfigDict(
         env_file=".env",
