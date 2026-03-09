@@ -26,7 +26,6 @@ class WarpService:
             api_key=settings.warp_api_key
         )
         self.environment_id = settings.warp_environment_id
-        self.model_id = settings.warp_model_id
         self.github_mcp_config = {
             "command": "npx",
             "args": ["-y", "@modelcontextprotocol/server-github"],
@@ -49,28 +48,17 @@ class WarpService:
         try:
             logger.info(f"Processing message from {from_number}: {message}")
 
-            # Concise prompt optimized for SMS responses
-            prompt = f"""SMS request: {message}
+            prompt = f"""You are an SMS bot. Keep your final status message under 160 characters.
+On success start with "PR:" followed by the full GitHub PR URL.
+On error start with "Error:" followed by a one-line description.
+No markdown. No explanations.
 
-Execute the request and respond with ONLY:
-- On success: "PR: [full GitHub PR URL]"
-- On error: "Error: [one-line description]"
+SMS request: {message}"""
 
-No explanations. No markdown. Just the result."""
-
-            # SMS-optimized agent configuration
             response = await self.client.agent.run(
                 prompt=prompt,
                 config={
                     "environment_id": self.environment_id,
-                    "model_id": self.model_id,
-                    "name": f"sms-{from_number[-4:]}",
-                    "base_prompt": """You are an SMS bot. Your responses must be:
-- Under 160 characters total
-- Single line when possible
-- Start with "PR:" or "Error:"
-- Include full URLs (no markdown formatting)
-- No explanations or extra text""",
                     "mcp_servers": {
                         "github": self.github_mcp_config
                     }
@@ -207,8 +195,6 @@ No explanations. No markdown. Just the result."""
             prompt=prompt,
             config={
                 "environment_id": self.environment_id,
-                "model_id": self.model_id,
-                "name": f"create-pr-{repo}",
                 "mcp_servers": {
                     "github": self.github_mcp_config
                 }
